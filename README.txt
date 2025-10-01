@@ -1,6 +1,12 @@
 ## CSOPESY: Marquee Console
 ### by S13 Group 6
 
+## Members
+- Almin, Wesner III C.
+- Artus, Arianne Yari A.
+- Perol, Francine Nicole T.
+- Rueco, Gabrielle Gille T.
+
 ## Running the Code
 
 ### Option 1 - Windows Command Prompt
@@ -23,3 +29,6 @@ cl /std:c++17 /EHsc main.cpp utils.cpp keyboard.cpp interpreter.cpp display.cpp 
 ```bat
 main.exe
 ```
+
+## Entry Class File
+- Main function is located inside `main.cpp`
