@@ -26,20 +26,20 @@ void command_interpreter_thread_func() {
                 prompt_display_buffer =
                     "Available commands:\n"
                     "help - show commands\n"
-                    "start - start animation\n"
-                    "stop - stop animation\n"
-                    "message <text> - set marquee text\n"
-                    "speed <ms> - set animation speed\n"
+                    "start_marquee - start animation\n"
+                    "stop_marquee - stop animation\n"
+                    "set_text <text> - set marquee text\n"
+                    "set_speed <ms> - set animation speed\n"
                     "exit - quit program";
-            } else if (command == "start") {
+            } else if (command == "start_marquee") {
                 marquee_running = true;
                 std::unique_lock<std::mutex> lock(prompt_mutex);
                 prompt_display_buffer = "Marquee started.";
-            } else if (command == "stop") {
+            } else if (command == "stop_marquee") {
                 marquee_running = false;
                 std::unique_lock<std::mutex> lock(prompt_mutex);
                 prompt_display_buffer = "Marquee stopped.";
-            } else if (command == "message") { // checks if there is a text parameter provided
+            } else if (command == "set_text") { // checks if there is a text parameter provided
                 if (tokens.size() > 1) {
                     std::string new_text;
                     for (size_t i = 1; i < tokens.size(); ++i) { // loops through the tokens to reconstruct the text
@@ -57,7 +57,7 @@ void command_interpreter_thread_func() {
                     std::unique_lock<std::mutex> lock(prompt_mutex);
                     prompt_display_buffer = "No text parameter provided.";
                 }
-            } else if (command == "speed") {
+            } else if (command == "set_speed") {
                 if (tokens.size() > 1) { // checks if there is a speed parameter provided
                     try {
                         int speed = std::stoi(tokens[1]); // converts the speed parameter from a string to an integer
