@@ -10,10 +10,6 @@
 int main() {
     std::signal(SIGINT, handle_sigint); // ensure cleanup on Ctrl-C
 
-#ifdef _WIN32
-    enable_windows_ansi(); // Enable ANSI escape sequences on Windows
-#endif
-
 #ifndef _WIN32
     // Ensure raw-mode disabled at exit even if something bad happens
     atexit([](){ disable_raw_mode(); });
