@@ -61,7 +61,9 @@ std::string get_timestamp() {
 
 std::string log_format(int core_id, const std::string &instruction) {
     //FORMAT: (MM/DD/YYYY HH:MM:SSAM/PM) Core: [core_id] [instruction executed]
-    std::string time = get_timestamp();
+    std::ostringstream oss;
+    oss << get_timestamp() << " Core: " << std::to_string(core_id) << " " << instruction;
+    return oss.str();
 }
 
 int generate_pid() {

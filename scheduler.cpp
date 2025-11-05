@@ -24,6 +24,7 @@ std::unique_ptr<ProcessControlBlock> generate_random_process() {
         Instruction instruction = generate_random_instruction(0, declared_vars);
         pcb->process->instructions.push_back(instruction);
 
+        // update declared_vars if a DECLARE instruction is generated
         if (instruction.type == DECLARE) {
             declared_vars.push_back(instruction.arg1);
         }

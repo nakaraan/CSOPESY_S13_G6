@@ -22,7 +22,7 @@ static bool flatten_instructions(const std::vector<Instruction>& instructions, s
     return true;
 }
 
-void execute_instruction(ProcessControlBlock& pcb) {
+void execute_instruction(ProcessControlBlock& pcb, int core_id) {
     if (pcb.processState == State::BLOCKED || pcb.sleepTicks > 0) { // returns early if the process is blocked/sleeping
         return;
     }
@@ -51,10 +51,10 @@ void execute_instruction(ProcessControlBlock& pcb) {
         case PRINT: {
             // prints "Hello world from [process name]!" plus any additional message
             std::string output = "Hello world from " + pcb.process->name + "!";
-            if (instruction.arg2.empty()) {
+            if (!instruction.arg2.empty()) {
                 output += " " + instruction.arg2;
             } 
-            pcb.logs.push_back(output);
+            pcb.logs.push_back(log_format(core_id, output));
             break;
         }
         case DECLARE: {

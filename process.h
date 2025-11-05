@@ -49,6 +49,6 @@ struct ProcessControlBlock {
     bool isFlattened = false;
 };
 
-void execute_instruction(ProcessControlBlock& pcb);
+void execute_instruction(ProcessControlBlock& pcb, int core_id);
 
 #endif
