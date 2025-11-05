@@ -14,7 +14,6 @@
 
 void keyboard_handler_thread_func() {
 #ifdef _WIN32
-    // Windows implementation using _kbhit/_getch
     while (is_running) {
         if (_kbhit()) {
             int ch = _getch();
@@ -37,7 +36,6 @@ void keyboard_handler_thread_func() {
         }
     }
 #else
-    // POSIX implementation: enable raw mode then read chars non-blocking
     enable_raw_mode();
     while (is_running) {
         char c = 0;
@@ -50,7 +48,7 @@ void keyboard_handler_thread_func() {
                 lock.unlock();
                 std::unique_lock<std::mutex> qlock(command_queue_mutex);
                 command_queue.push(line);
-            } else if (c == 127 || c == 8) { // Backspace detected
+            } else if (c == 127 || c == 8) { // Backspace
                 if (!current_input.empty()) current_input.pop_back();
             } else if (c == 3) { // Ctrl-C
                 is_running = false;
@@ -59,11 +57,10 @@ void keyboard_handler_thread_func() {
                 current_input.push_back(c);
             }
         } else {
-            // No input right now
+            // No input
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
-    // restore terminal (also done at program exit)
     disable_raw_mode();
 #endif
 }

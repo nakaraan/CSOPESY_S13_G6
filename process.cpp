@@ -49,10 +49,20 @@ void execute_instruction(ProcessControlBlock& pcb, int core_id) {
 
     switch (instruction.type) {
         case PRINT: {
-            // prints "Hello world from [process name]!" plus any additional message
             std::string output = "Hello world from " + pcb.process->name + "!";
             if (!instruction.arg2.empty()) {
-                output += " " + instruction.arg2;
+                // Check if arg2 contains a variable reference
+                size_t pos = instruction.arg2.find("Value from: ");
+                if (pos != std::string::npos) {
+                    std::string varName = instruction.arg2.substr(pos + 12);
+                    if (pcb.memory.find(varName) != pcb.memory.end()) {
+                        output += " Value from: " + std::to_string(pcb.memory[varName]);
+                    } else {
+                        output += " " + instruction.arg2;
+                    }
+                } else {
+                    output += " " + instruction.arg2;
+                }
             } 
             pcb.logs.push_back(log_format(core_id, output));
             break;

@@ -17,11 +17,16 @@ static std::thread generator_thread;
 static std::thread sleep_watcher_thread;
 static std::atomic<bool> scheduler_active{false};
 
+bool is_scheduler_active() {
+    return scheduler_active;
+}
+
 std::shared_ptr<ProcessControlBlock> generate_random_process() {
     std::random_device rd;
     std::mt19937 gen(rd());
     
     std::uniform_int_distribution<> instruction_distrib(min_ins, max_ins);
+    std::uniform_int_distribution<> add_value_distrib(1, 10);
     
     auto pcb = std::make_shared<ProcessControlBlock>();
     pcb->process = std::make_unique<Process>();
@@ -29,15 +34,28 @@ std::shared_ptr<ProcessControlBlock> generate_random_process() {
     pcb->process->name = generate_process_name();
     pcb->processState = State::READY;
 
-    int num_instructions = instruction_distrib(gen);
-    std::vector<std::string> declared_vars;
-    for (int i = 0; i < num_instructions; ++i) {
-        Instruction instruction = generate_random_instruction(0, declared_vars);
-        pcb->process->instructions.push_back(instruction);
+    // Initialize variable x to 0
+    pcb->memory["x"] = 0;
 
-        if (instruction.type == DECLARE) {
-            declared_vars.push_back(instruction.arg1);
+    int num_instructions = instruction_distrib(gen);
+    for (int i = 0; i < num_instructions; ++i) {
+        Instruction instruction;
+        
+        if (i % 2 == 0) {
+            // PRINT instruction
+            instruction.type = PRINT;
+            instruction.arg2 = "Value from: x";
+        } else {
+            // ADD instruction: x = x + [1-10]
+            instruction.type = ADD;
+            instruction.arg1 = "x";
+            instruction.arg2 = "x";
+            instruction.isLiteral1 = false;
+            instruction.isLiteral2 = true;
+            instruction.val2 = add_value_distrib(gen);
         }
+        
+        pcb->process->instructions.push_back(instruction);
     }
 
     return pcb;
@@ -113,24 +131,6 @@ void scheduler_start() {
     if (scheduler_active) return;
     scheduler_active = true;
     scheduler_running = true;
-
-    // Generator thread
-    generator_thread = std::thread([](){
-        while (scheduler_active && is_running) {
-            auto pcb = generate_random_process();
-            {
-                std::unique_lock<std::mutex> lock(process_table_mutex);
-                process_table[pcb->process->name] = pcb;
-                ready_queue.push(pcb);
-            }
-            ready_cv.notify_one();
-
-            for (int i = 0; i < std::max(1, batch_process_freq) && scheduler_active && is_running; ++i) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                cpuCycles++;
-            }
-        }
-    });
 
     // Sleep watcher thread
     sleep_watcher_thread = std::thread([](){
@@ -210,14 +210,57 @@ void scheduler_start() {
     }
 }
 
+void scheduler_test() {
+    if (!scheduler_active) {
+        scheduler_start();
+    }
+    
+    if (generator_thread.joinable()) return;
+    
+    scheduler_running = true;
+    
+    generator_thread = std::thread([](){
+        while (scheduler_running && is_running) {
+            auto pcb = generate_random_process();
+            {
+                std::unique_lock<std::mutex> lock(process_table_mutex);
+                process_table[pcb->process->name] = pcb;
+                ready_queue.push(pcb);
+            }
+            ready_cv.notify_one();
+
+            for (int i = 0; i < std::max(1, batch_process_freq) && scheduler_running && is_running; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                cpuCycles++;
+            }
+        }
+    });
+}
+
 void scheduler_stop() {
     if (!scheduler_active) return;
-    scheduler_active = false;
+    
+    // Stop generator first (stops creating new processes)
     scheduler_running = false;
+    if (generator_thread.joinable()) generator_thread.join();
+    
+    // Stop scheduler cores immediately
+    scheduler_active = false;
     ready_cv.notify_all();
 
-    if (generator_thread.joinable()) generator_thread.join();
     if (sleep_watcher_thread.joinable()) sleep_watcher_thread.join();
     for (auto &t : core_threads) if (t.joinable()) t.join();
     core_threads.clear();
+    
+    // Move any remaining processes to finished
+    {
+        std::unique_lock<std::mutex> lock(process_table_mutex);
+        for (auto &kv : process_table) {
+            finished_processes.push_back(kv.second);
+        }
+        process_table.clear();
+        while (!ready_queue.empty()) {
+            ready_queue.pop();
+        }
+    }
 }

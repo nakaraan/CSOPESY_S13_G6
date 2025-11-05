@@ -10,7 +10,9 @@
 
 // Forward declaration from scheduler.cpp
 void scheduler_start();
+void scheduler_test();
 void scheduler_stop();
+bool is_scheduler_active();
 std::shared_ptr<ProcessControlBlock> generate_random_process();
 
 void command_interpreter_thread_func() {
@@ -58,6 +60,7 @@ void command_interpreter_thread_func() {
                         else if (key == "delay-per-exec") { iss >> delay_per_exec; }
                     }
                     initialized = true;
+                    scheduler_start();
                     std::unique_lock<std::mutex> lock(prompt_mutex);
                     prompt_display_buffer = "Initialized with " + std::to_string(num_cpu) + " CPUs, scheduler: " + scheduler_type;
                 }
@@ -93,8 +96,15 @@ void command_interpreter_thread_func() {
                         
                         {
                             std::unique_lock<std::mutex> lock(process_table_mutex);
-                            cores_used = std::min((int)process_table.size(), num_cpu);
-                            cores_available = num_cpu - cores_used;
+                            
+                            // If scheduler is stopped, CPU utilization is 0%
+                            if (!is_scheduler_active()) {
+                                cores_used = 0;
+                                cores_available = num_cpu;
+                            } else {
+                                cores_used = std::min((int)process_table.size(), num_cpu);
+                                cores_available = num_cpu - cores_used;
+                            }
                             
                             oss << "CPU utilization: " << (cores_used * 100 / std::max(1, num_cpu)) << "%\n";
                             oss << "Cores used: " << cores_used << "\n";
@@ -106,7 +116,8 @@ void command_interpreter_thread_func() {
                                 oss << pcb->process->name << "    ";
                                 oss << get_timestamp() << "    ";
                                 oss << "Core: " << (pcb->process->pid % num_cpu) << "    ";
-                                oss << pcb->programCounter << " / " << pcb->flattenedInstructions.size() << "\n";
+                                int total_lines = pcb->flattenedInstructions.empty() ? pcb->process->instructions.size() : pcb->flattenedInstructions.size();
+                                oss << pcb->programCounter << " / " << total_lines << "\n";
                             }
                             
                             oss << "\nFinished processes:\n";
@@ -156,10 +167,24 @@ void command_interpreter_thread_func() {
                             pause_display_refresh = true;
                             
                             // Interactive screen mode
-                            std::cout << "\nAttached to " << pname << ". Type 'process-smi' or 'exit'.\n" << std::flush;
+                            std::cout << "\nAttached to " << pname << ". Type 'process-smi' or 'exit'.\n> " << std::flush;
 
                             bool attached = true;
+                            std::string last_input_shown = "";
+                            
                             while (attached && is_running) {
+                                // Display current input being typed
+                                std::string current_input_copy;
+                                {
+                                    std::unique_lock<std::mutex> ilock(input_mutex);
+                                    current_input_copy = current_input;
+                                }
+                                
+                                if (current_input_copy != last_input_shown) {
+                                    std::cout << "\r> " << current_input_copy << "    " << std::flush;
+                                    last_input_shown = current_input_copy;
+                                }
+                                
                                 std::string subcmd;
                                 {
                                     std::unique_lock<std::mutex> qlock(command_queue_mutex);
@@ -172,8 +197,13 @@ void command_interpreter_thread_func() {
                                     command_queue.pop();
                                 }
                                 
+                                last_input_shown = "";
+                                
                                 std::vector<std::string> subtokens = split_string(subcmd);
-                                if (subtokens.empty()) continue;
+                                if (subtokens.empty()) {
+                                    std::cout << "\n> " << std::flush;
+                                    continue;
+                                }
                                 std::string scmd = to_lowercase(subtokens[0]);
                                 
                                 if (scmd == "process-smi") {
@@ -184,10 +214,10 @@ void command_interpreter_thread_func() {
                                     for (auto &l : pcb->logs) oss << l << "\n";
                                     oss << "\n";
                                     oss << "Current instruction line: " << pcb->programCounter << "\n";
-                                    oss << "Lines of code: " << pcb->flattenedInstructions.size() << "\n";
+                                    int total_lines = pcb->flattenedInstructions.empty() ? pcb->process->instructions.size() : pcb->flattenedInstructions.size();
+                                    oss << "Lines of code: " << total_lines << "\n";
                                     if (pcb->processState == State::TERMINATED) oss << "\nFinished!\n";
                                     
-                                    // Print directly to console
                                     std::cout << "\n" << oss.str() << "\n> " << std::flush;
                                 } else if (scmd == "exit") {
                                     attached = false;
@@ -216,6 +246,11 @@ void command_interpreter_thread_func() {
                 scheduler_start();
                 std::unique_lock<std::mutex> lock(prompt_mutex);
                 prompt_display_buffer = "Scheduler started.";
+            }
+            else if (command == "scheduler-test") {
+                scheduler_test();
+                std::unique_lock<std::mutex> lock(prompt_mutex);
+                prompt_display_buffer = "Scheduler test mode started.";
             }
             else if (command == "scheduler-stop") {
                 scheduler_stop();

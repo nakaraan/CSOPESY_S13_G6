@@ -7,7 +7,7 @@
 void marquee_logic_thread_func(int display_width) {
     while (is_running) {
         if (marquee_running) {
-            // compute wrap length safely
+            // compute wrap length
             int text_len;
             {
                 std::unique_lock<std::mutex> lock(marquee_to_display_mutex);
