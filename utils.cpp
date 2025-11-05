@@ -5,14 +5,14 @@
 #include <cctype>
 #include <sstream>
 #include <csignal>
+#include <iomanip>
+#include <chrono>
 #ifndef _WIN32
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
 #include <cstdint>
-#include <chrono>
 #include <ctime>
-#include <iomanip>
 #include <sstream>
 #endif
 
@@ -57,6 +57,11 @@ std::string get_timestamp() {
         << ")";
 
     return oss.str();
+}
+
+std::string log_format(int core_id, const std::string &instruction) {
+    //FORMAT: (MM/DD/YYYY HH:MM:SSAM/PM) Core: [core_id] [instruction executed]
+    std::string time = get_timestamp();
 }
 
 int generate_pid() {

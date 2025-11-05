@@ -2,29 +2,58 @@
 #include "utils.h"
 #include <algorithm>
 
+static bool flatten_instructions(const std::vector<Instruction>& instructions, std::vector<Instruction>& flatInst, int loopDepth = 0) {
+    if (loopDepth > 3)
+        return false; // prevents nesting beyond 3 levels
+
+    for (const Instruction& instr : instructions) {
+        if (instr.type != FOR_LOOP) { 
+            flatInst.push_back(instr); // if instruction is not a FOR_LOOP, add it directly to the dst vector unchanged
+        } else {
+            if (loopDepth == 3)
+                return false; 
+            for (uint16_t i = 0; i < instr.val1; ++i) { 
+                if (!flatten_instructions(instr.instrSet, flatInst, loopDepth + 1)) {
+                    return false; 
+                }
+            }
+        }
+    }
+    return true;
+}
+
 void execute_instruction(ProcessControlBlock& pcb) {
-    if (pcb.programCounter >= pcb.process->instructions.size()) {
+    if (pcb.processState == State::BLOCKED || pcb.sleepTicks > 0) { // returns early if the process is blocked/sleeping
+        return;
+    }
+
+    if (!pcb.isFlattened) { // flattens instructions during the first execution (initial value of isFlattened is false)
+        pcb.flattenedInstructions.clear(); 
+        bool success = flatten_instructions(pcb.process->instructions, pcb.flattenedInstructions, 0);
+        pcb.isFlattened = true;
+
+        if (!success) {
+            pcb.flattenedInstructions.clear();
+            pcb.logs.push_back("Error: Maximum FOR_LOOP nesting depth exceeded.");
+        }
+        pcb.programCounter = 0;
+    }
+    
+    if (pcb.programCounter < 0 || pcb.programCounter >= static_cast<int>(pcb.flattenedInstructions.size())) {
         pcb.processState = State::TERMINATED;
         return;
     }
 
-    Instruction& instruction = pcb.process->instructions[pcb.programCounter];
+    Instruction& instruction = pcb.flattenedInstructions[pcb.programCounter];
     pcb.processState = State::RUNNING;
 
     switch (instruction.type) {
         case PRINT: {
             // prints "Hello world from [process name]!" plus any additional message
-            std::string output;
-            if (!instruction.arg1.empty()) {
-                output = instruction.arg1;
-                if (pcb.memory.count(instruction.arg2)) {
-                    output += std::to_string(pcb.memory[instruction.arg2]);
-                } else {
-                    output += instruction.arg2;
-                }
-            } else {
-                output = "Hello world from " + pcb.process->name + "!";
-            }
+            std::string output = "Hello world from " + pcb.process->name + "!";
+            if (instruction.arg2.empty()) {
+                output += " " + instruction.arg2;
+            } 
             pcb.logs.push_back(output);
             break;
         }
@@ -91,25 +120,18 @@ void execute_instruction(ProcessControlBlock& pcb) {
         case FOR_LOOP: {
             // performs a for-loop given a set/array of instructions
             // can be nested up to 3 times
-            if (pcb.nestingDepth >= 3) {
-                pcb.logs.push_back("Error: Maximum FOR loop depth reached.");
-                return;
-            }
-            
-            pcb.nestingDepth++;
-            for (int i = 0; i < instruction.val1; ++i) {
-                for (Instruction& innerLoop : instruction.instrSet) {
-                    execute_instruction(pcb);
-                    if (pcb.processState == State::BLOCKED || pcb.processState == State::TERMINATED) {
-                        pcb.nestingDepth--;
-                        return; // exit if process is blocked or terminated
-                    }
-                }
-            }
-            pcb.nestingDepth--;
             break;
         }
     }
 
+    if (pcb.processState == State::BLOCKED || pcb.processState == State::TERMINATED)
+        return;
+    
     pcb.programCounter++;
+
+    if (pcb.programCounter >= static_cast<int>(pcb.flattenedInstructions.size())) {
+        pcb.processState = State::TERMINATED;
+    } else {
+        pcb.processState = State::READY;
+    }
 }

@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
 
 enum InstructionType {
     PRINT,
@@ -37,13 +38,15 @@ struct Process {
 };
 
 struct ProcessControlBlock {
-    Process* process;
+    std::unique_ptr<Process> process;
     State processState = READY;
     int programCounter = 0;
     uint8_t sleepTicks = 0;
-    int nestingDepth =0; 
+    int nestingDepth = 0; 
     std::unordered_map<std::string, uint16_t> memory;
     std::vector<std::string> logs;
+    std::vector<Instruction> flattenedInstructions;
+    bool isFlattened = false;
 };
 
 void execute_instruction(ProcessControlBlock& pcb);
