@@ -5,6 +5,39 @@
 #include <thread>
 #include <chrono>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+void clear_screen() {
+#ifdef _WIN32
+    // Use Windows API to clear screen reliably
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    DWORD count;
+    DWORD cellCount;
+    COORD homeCoords = {0, 0};
+
+    if (hConsole == INVALID_HANDLE_VALUE) return;
+
+    // Get console size
+    if (!GetConsoleScreenBufferInfo(hConsole, &csbi)) return;
+    cellCount = csbi.dwSize.X * csbi.dwSize.Y;
+
+    // Fill screen with spaces
+    if (!FillConsoleOutputCharacter(hConsole, (TCHAR)' ', cellCount, homeCoords, &count)) return;
+
+    // Fill screen with current attributes
+    if (!FillConsoleOutputAttribute(hConsole, csbi.wAttributes, cellCount, homeCoords, &count)) return;
+
+    // Move cursor to home
+    SetConsoleCursorPosition(hConsole, homeCoords);
+#else
+    // Use ANSI escape codes for POSIX systems
+    std::cout << "\033[2J\033[H" << std::flush;
+#endif
+}
+
 void display_thread_func() {
     const int refresh_rate_ms = 400; 
     const int display_width = 40;
@@ -49,8 +82,8 @@ void display_thread_func() {
             input_snapshot = current_input;
         }
 
-        // Clear screen + draw (ANSI escapes)
-        std::cout << "\033[2J\033[H"; // Clear screen + move cursor to home
+        // Clear screen + draw
+        clear_screen();
         std::cout << "=========  OS Marquee Emulator  ========\n\n";
         std::cout << text_to_show << "\n\n";
         std::cout << "Type 'help' for commands.\n\n";

@@ -126,13 +126,14 @@ void disable_raw_mode() {
 
 #ifdef _WIN32
 void enable_windows_ansi() {
+    // Enable ANSI escape sequence support on Windows 10+
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut == INVALID_HANDLE_VALUE) return;
 
     DWORD mode = 0;
     if (!GetConsoleMode(hOut, &mode)) return;
 
-    // Enable virtual terminal processing so ANSI escapes (clear screen, cursor) work.
+    // Enable virtual terminal processing (ANSI escape codes)
     mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     SetConsoleMode(hOut, mode);
 }
