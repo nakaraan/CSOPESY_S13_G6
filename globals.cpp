@@ -2,6 +2,7 @@
 
 // --- Shared State and Thread Control ---
 std::atomic<bool> is_running{true};   // Global flag to signal threads to exit
+std::atomic<bool> scheduler_running{false}; // initialized to false at the start
 
 // Prompt messages (command feedback) shared between interpreter and display
 std::string prompt_display_buffer = "";
@@ -26,3 +27,12 @@ std::string current_input;
 std::mutex input_mutex;
 
 // ^ISSUE ENCOUNTERED: whatever typed gets overwritten so nothing happens
+
+// config.txt parameters
+int num_cpu;
+std::string scheduler_type;
+int quantum_cycles;
+int batch_process_freq;
+int min_ins;
+int max_ins;
+int delay_per_exec;

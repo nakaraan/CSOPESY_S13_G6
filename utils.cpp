@@ -9,6 +9,11 @@
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <cstdint>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #endif
 
 std::string to_lowercase(const std::string &s) {
@@ -26,6 +31,44 @@ std::vector<std::string> split_string(const std::string& str) { // splits the st
         tokens.push_back(token); // adds the extracted word to the end of the vector
     }
     return tokens; // returns a vector of strings where each token becomes an element
+}
+
+uint16_t clamp_uint16 (int val) {
+    if (val < 0) return 0;
+    if (val > 65535) return 65535;
+    return static_cast<uint16_t>(val);
+}
+
+std::string get_timestamp() { 
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+
+    std::tm local_tm{};
+
+#ifdef _WIN32
+    localtime_s(&local_tm, &now_time);
+#else
+    localtime_r(&now_time, &local_tm);
+#endif
+    std::ostringstream oss;
+    oss << "("
+        << std::put_time(&local_tm, "%m/%d/%Y %I:%M:%S")
+        << (local_tm.tm_hour >= 12 ? " PM" : " AM") // indicate whether it's AM or PM
+        << ")";
+
+    return oss.str();
+}
+
+int generate_pid() {
+    static int pid = 1;
+    return pid++;
+}
+
+std::string generate_process_name() {
+    static int process_name = 1;
+    std::ostringstream oss;
+    oss << "p" << std::setw(2) << std::setfill('0') << process_name++;
+    return oss.str();
 }
 
 // Simple SIGINT handler to cleanup nicely

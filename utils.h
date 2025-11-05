@@ -4,9 +4,12 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 std::string to_lowercase(const std::string &s);
 std::vector<std::string> split_string(const std::string& str);
+uint16_t clamp_uint16 (int val);
+std::string get_timestamp();
 void handle_sigint(int);
 
 #ifndef _WIN32

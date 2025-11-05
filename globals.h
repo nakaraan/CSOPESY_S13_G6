@@ -11,6 +11,7 @@ extern std::atomic<bool> is_running;
 extern std::atomic<bool> marquee_running;
 extern std::atomic<int> marquee_speed;
 extern std::atomic<int> marquee_position;
+extern std::atomic<bool> scheduler_running;
 
 // Shared buffers
 extern std::string marquee_text;
@@ -25,5 +26,15 @@ extern std::mutex input_mutex;
 
 // Command queue
 extern std::queue<std::string> command_queue;
+
+// config.txt parameters
+extern int num_cpu;
+extern std::string scheduler_type;
+extern int quantum_cycles;
+extern int batch_process_freq;
+extern int min_ins;
+extern int max_ins;
+extern int delay_per_exec;
+
 
 #endif
