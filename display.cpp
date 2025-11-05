@@ -82,13 +82,15 @@ void display_thread_func() {
             input_snapshot = current_input;
         }
 
-        // Clear screen + draw
-        clear_screen();
-        std::cout << "=========  OS Marquee Emulator  ========\n\n";
-        std::cout << text_to_show << "\n\n";
-        std::cout << "Type 'help' for commands.\n\n";
-        std::cout << prompt_message << "\n";
-        std::cout << "> " << input_snapshot << std::flush; // show typed text
+        // Only clear and refresh if not paused (i.e., not in a submenu)
+        if (!pause_display_refresh) {
+            clear_screen();
+            std::cout << "=========  OS Marquee Emulator  ========\n\n";
+            std::cout << text_to_show << "\n\n";
+            std::cout << "Type 'help' for commands.\n\n";
+            std::cout << prompt_message << "\n";
+            std::cout << "> " << input_snapshot << std::flush; // show typed text
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(refresh_rate_ms));
     }

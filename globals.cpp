@@ -3,6 +3,7 @@
 // --- Shared State and Thread Control ---
 std::atomic<bool> is_running{true};   // Global flag to signal threads to exit
 std::atomic<bool> scheduler_running{false}; // initialized to false at the start
+std::atomic<bool> pause_display_refresh{false}; // Pause auto-refresh when viewing submenus
 
 // Prompt messages (command feedback) shared between interpreter and display
 std::string prompt_display_buffer = "";

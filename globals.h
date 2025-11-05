@@ -19,6 +19,7 @@ extern std::atomic<bool> marquee_running;
 extern std::atomic<int> marquee_speed;
 extern std::atomic<int> marquee_position;
 extern std::atomic<bool> scheduler_running;
+extern std::atomic<bool> pause_display_refresh; // Control whether display auto-refreshes
 
 // Shared buffers
 extern std::string marquee_text;

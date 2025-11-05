@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 // Forward declaration from scheduler.cpp
 void scheduler_start();
@@ -83,6 +84,9 @@ void command_interpreter_thread_func() {
                         prompt_display_buffer = "Process " + pname + " created.";
                     }
                     else if (tokens[1] == "-ls") {
+                        // Pause auto-refresh so user can scroll through the list
+                        pause_display_refresh = true;
+                        
                         std::ostringstream oss;
                         int cores_used = 0;
                         int cores_available = num_cpu;
@@ -113,8 +117,28 @@ void command_interpreter_thread_func() {
                                 oss << f->flattenedInstructions.size() << " / " << f->flattenedInstructions.size() << "\n";
                             }
                         }
+                        
+                        // Print directly to console since display refresh is paused
+                        std::cout << "\n" << oss.str() << "\n";
+                        std::cout << "Press any key to return to main menu..." << std::flush;
+                        
+                        // Wait for user input before returning
+                        {
+                            std::unique_lock<std::mutex> qlock(command_queue_mutex);
+                            while (command_queue.empty() && is_running) {
+                                qlock.unlock();
+                                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                                qlock.lock();
+                            }
+                            if (!command_queue.empty()) {
+                                command_queue.pop(); // consume the keypress
+                            }
+                        }
+                        
+                        // Resume auto-refresh when returning to main menu
+                        pause_display_refresh = false;
                         std::unique_lock<std::mutex> lock(prompt_mutex);
-                        prompt_display_buffer = oss.str();
+                        prompt_display_buffer = "Returned to main menu.";
                     }
                     else if (tokens[1] == "-r" && tokens.size() > 2) {
                         std::string pname = tokens[2];
@@ -128,10 +152,11 @@ void command_interpreter_thread_func() {
                             std::unique_lock<std::mutex> lock(prompt_mutex);
                             prompt_display_buffer = "Process " + pname + " not found.";
                         } else {
+                            // Pause display refresh while in interactive screen mode
+                            pause_display_refresh = true;
+                            
                             // Interactive screen mode
-                            std::unique_lock<std::mutex> plock(prompt_mutex);
-                            prompt_display_buffer = "Attached to " + pname + ". Type 'process-smi' or 'exit'.";
-                            plock.unlock();
+                            std::cout << "\nAttached to " << pname << ". Type 'process-smi' or 'exit'.\n" << std::flush;
 
                             bool attached = true;
                             while (attached && is_running) {
@@ -162,17 +187,20 @@ void command_interpreter_thread_func() {
                                     oss << "Lines of code: " << pcb->flattenedInstructions.size() << "\n";
                                     if (pcb->processState == State::TERMINATED) oss << "\nFinished!\n";
                                     
-                                    std::unique_lock<std::mutex> lock(prompt_mutex);
-                                    prompt_display_buffer = oss.str();
+                                    // Print directly to console
+                                    std::cout << "\n" << oss.str() << "\n> " << std::flush;
                                 } else if (scmd == "exit") {
                                     attached = false;
-                                    std::unique_lock<std::mutex> lock(prompt_mutex);
-                                    prompt_display_buffer = "Detached from " + pname;
+                                    std::cout << "\nDetached from " << pname << "\n" << std::flush;
                                 } else {
-                                    std::unique_lock<std::mutex> lock(prompt_mutex);
-                                    prompt_display_buffer = "Unknown command in screen. Use 'process-smi' or 'exit'.";
+                                    std::cout << "\nUnknown command in screen. Use 'process-smi' or 'exit'.\n> " << std::flush;
                                 }
                             }
+                            
+                            // Resume display refresh when exiting screen
+                            pause_display_refresh = false;
+                            std::unique_lock<std::mutex> lock(prompt_mutex);
+                            prompt_display_buffer = "Returned to main menu.";
                         }
                     } else {
                         std::unique_lock<std::mutex> lock(prompt_mutex);
