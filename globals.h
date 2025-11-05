@@ -5,6 +5,13 @@
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <unordered_map>
+#include <vector>
+#include <memory>
+#include <condition_variable>
+
+// Forward declarations
+struct ProcessControlBlock;
 
 // Global flags
 extern std::atomic<bool> is_running;
@@ -36,5 +43,13 @@ extern int min_ins;
 extern int max_ins;
 extern int delay_per_exec;
 
+// process management
+extern std::unordered_map<std::string, std::shared_ptr<ProcessControlBlock>> process_table;
+extern std::vector<std::shared_ptr<ProcessControlBlock>> finished_processes;
+extern std::queue<std::shared_ptr<ProcessControlBlock>> ready_queue;
+extern std::mutex process_table_mutex;
+extern std::condition_variable ready_cv;
+extern bool initialized;
+extern std::atomic<int> cpuCycles;
 
 #endif

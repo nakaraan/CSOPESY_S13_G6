@@ -29,10 +29,19 @@ std::mutex input_mutex;
 // ^ISSUE ENCOUNTERED: whatever typed gets overwritten so nothing happens
 
 // config.txt parameters
-int num_cpu;
-std::string scheduler_type;
-int quantum_cycles;
-int batch_process_freq;
-int min_ins;
-int max_ins;
-int delay_per_exec;
+int num_cpu = 4;
+std::string scheduler_type = "fcfs";
+int quantum_cycles = 5;
+int batch_process_freq = 1;
+int min_ins = 1000;
+int max_ins = 2000;
+int delay_per_exec = 0;
+
+// Process management definitions
+std::unordered_map<std::string, std::shared_ptr<ProcessControlBlock>> process_table;
+std::vector<std::shared_ptr<ProcessControlBlock>> finished_processes;
+std::queue<std::shared_ptr<ProcessControlBlock>> ready_queue;
+std::mutex process_table_mutex;
+std::condition_variable ready_cv;
+bool initialized = false;
+std::atomic<int> cpuCycles{0};

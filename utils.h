@@ -20,4 +20,8 @@ void enable_raw_mode();
 void disable_raw_mode();
 #endif
 
+#ifdef _WIN32
+void enable_windows_ansi();
+#endif
+
 #endif

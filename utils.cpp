@@ -16,6 +16,10 @@
 #include <sstream>
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 std::string to_lowercase(const std::string &s) {
     std::string result = s;
     std::transform(result.begin(), result.end(), result.begin(),
@@ -117,5 +121,19 @@ void disable_raw_mode() {
     flags &= ~O_NONBLOCK;
     fcntl(STDIN_FILENO, F_SETFL, flags);
     tguard.enabled = false;
+}
+#endif
+
+#ifdef _WIN32
+void enable_windows_ansi() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) return;
+
+    DWORD mode = 0;
+    if (!GetConsoleMode(hOut, &mode)) return;
+
+    // Enable virtual terminal processing so ANSI escapes (clear screen, cursor) work.
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, mode);
 }
 #endif
