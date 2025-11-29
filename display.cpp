@@ -83,7 +83,7 @@ void display_thread_func() {
             std::cout << text_to_show << "\n\n";
             std::cout << "Type 'help' for commands.\n\n";
             std::cout << prompt_message << "\n";
-            std::cout << "> " << input_snapshot << std::flush; // show typed text
+            std::cout << "root:\\> " << input_snapshot << std::flush; // show typed text
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(refresh_rate_ms));
