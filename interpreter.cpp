@@ -2,7 +2,7 @@
 #include "globals.h"
 #include "utils.h"
 #include "process.h"
-#include "memory_manager.h"
+#include "memory.h"
 #include <thread>
 #include <chrono>
 #include <fstream>
@@ -67,7 +67,7 @@ void command_interpreter_thread_func() {
                     }
                     
                     // Initialize memory manager with max_overall_mem converted to bytes
-                    initializeMemoryManager(max_overall_mem * 1024 * 1024);
+                    initializeMemory(max_overall_mem * 1024 * 1024);
                     
                     initialized = true;
                     scheduler_start();
@@ -108,8 +108,8 @@ void command_interpreter_thread_func() {
                                 pcb->process->name = pname;
                                 
                                 // Allocate memory for the process
-                                if (globalMemoryManager) {
-                                    if (!globalMemoryManager->allocateProcess(pcb->process->pid, pmemsize)) {
+                                if (globalMemory) {
+                                    if (!globalMemory->allocateProcess(pcb->process->pid, pmemsize)) {
                                         std::unique_lock<std::mutex> lock(prompt_mutex);
                                         prompt_display_buffer = "Failed to allocate memory for process " + pname;
                                         continue;
@@ -134,8 +134,8 @@ void command_interpreter_thread_func() {
                         pcb->process->name = pname;
                         
                         // Allocate memory for the process
-                        if (globalMemoryManager) {
-                            if (!globalMemoryManager->allocateProcess(pcb->process->pid, 256)) {
+                        if (globalMemory) {
+                            if (!globalMemory->allocateProcess(pcb->process->pid, 256)) {
                                 std::unique_lock<std::mutex> lock(prompt_mutex);
                                 prompt_display_buffer = "Failed to allocate memory for process " + pname;
                                 continue;
@@ -150,6 +150,80 @@ void command_interpreter_thread_func() {
                         ready_cv.notify_one();
                         std::unique_lock<std::mutex> lock(prompt_mutex);
                         prompt_display_buffer = "Process " + pname + " created with 256 bytes (default).";
+                    }
+                    else if (tokens[1] == "-c" && tokens.size() > 3) {
+                        // screen -c <process_name> <memory_size> "<instructions>"
+                        std::string pname = tokens[2];
+                        std::string pmemsize_str = tokens[3];
+                        
+                        // Parse memory size
+                        int pmemsize_int = 0;
+                        if (!parse_integer(pmemsize_str, pmemsize_int) || pmemsize_int < 0) {
+                            std::unique_lock<std::mutex> lock(prompt_mutex);
+                            prompt_display_buffer = "invalid memory allocation";
+                        }
+                        else {
+                            size_t pmemsize = static_cast<size_t>(pmemsize_int);
+                            
+                            // Validate memory size
+                            if (!is_valid_memory_size(pmemsize)) {
+                                std::unique_lock<std::mutex> lock(prompt_mutex);
+                                prompt_display_buffer = "invalid memory allocation";
+                            }
+                            else {
+                                // Extract instruction string (everything after memory size, may be quoted)
+                                std::string instructionStr;
+                                size_t pos = command_line.find(tokens[3]);
+                                if (pos != std::string::npos) {
+                                    pos += tokens[3].length();
+                                    instructionStr = command_line.substr(pos);
+                                    // Trim leading/trailing whitespace and quotes
+                                    size_t start = instructionStr.find_first_not_of(" \t\"");
+                                    size_t end = instructionStr.find_last_not_of(" \t\"");
+                                    if (start != std::string::npos && end != std::string::npos) {
+                                        instructionStr = instructionStr.substr(start, end - start + 1);
+                                    }
+                                }
+                                
+                                // Parse user instructions
+                                std::vector<Instruction> userInstructions = parseUserInstructions(instructionStr);
+                                
+                                // Validate instruction count (1-50)
+                                if (userInstructions.empty() || userInstructions.size() > 50) {
+                                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                                    prompt_display_buffer = "invalid command";
+                                }
+                                else {
+                                    // Create process with user-defined instructions
+                                    auto pcb = std::make_shared<ProcessControlBlock>();
+                                    pcb->process = std::make_unique<Process>();
+                                    pcb->process->pid = generate_pid();
+                                    pcb->process->name = pname;
+                                    pcb->process->instructions = userInstructions;
+                                    pcb->process->memorySize = pmemsize;
+                                    pcb->initializeMemory(pmemsize);
+                                    
+                                    // Allocate memory for the process
+                                    if (globalMemory) {
+                                        if (!globalMemory->allocateProcess(pcb->process->pid, pmemsize)) {
+                                            std::unique_lock<std::mutex> lock(prompt_mutex);
+                                            prompt_display_buffer = "Failed to allocate memory for process " + pname;
+                                            continue;
+                                        }
+                                    }
+                                    
+                                    {
+                                        std::unique_lock<std::mutex> lock(process_table_mutex);
+                                        process_table[pname] = pcb;
+                                        ready_queue.push(pcb);
+                                    }
+                                    ready_cv.notify_one();
+                                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                                    prompt_display_buffer = "Process " + pname + " created with " + 
+                                                           std::to_string(userInstructions.size()) + " user-defined instructions.";
+                                }
+                            }
+                        }
                     }
                     else if (tokens[1] == "-ls") {
                         // Pause auto-refresh so user can scroll through the list
@@ -219,14 +293,36 @@ void command_interpreter_thread_func() {
                     else if (tokens[1] == "-r" && tokens.size() > 2) {
                         std::string pname = tokens[2];
                         std::shared_ptr<ProcessControlBlock> pcb;
+                        bool foundInFinished = false;
+                        
                         {
                             std::unique_lock<std::mutex> lock(process_table_mutex);
                             auto it = process_table.find(pname);
-                            if (it != process_table.end()) pcb = it->second;
+                            if (it != process_table.end()) {
+                                pcb = it->second;
+                            } else {
+                                // Check if in finished processes
+                                for (const auto& fp : finished_processes) {
+                                    if (fp->process->name == pname) {
+                                        pcb = fp;
+                                        foundInFinished = true;
+                                        break;
+                                    }
+                                }
+                            }
                         }
+                        
                         if (!pcb) {
                             std::unique_lock<std::mutex> lock(prompt_mutex);
                             prompt_display_buffer = "Process " + pname + " not found.";
+                        } else if (pcb->hasMemoryViolation) {
+                            // Process shut down due to memory violation
+                            std::ostringstream oss;
+                            oss << "Process " << pname << " shut down due to memory access violation error that occurred at "
+                                << pcb->memoryViolationTime << ". 0x" 
+                                << std::hex << std::uppercase << pcb->memoryViolationAddress << " invalid";
+                            std::unique_lock<std::mutex> lock(prompt_mutex);
+                            prompt_display_buffer = oss.str();
                         } else {
                             // Pause display refresh while in interactive screen mode
                             pause_display_refresh = true;
@@ -361,12 +457,12 @@ void command_interpreter_thread_func() {
             }
             // Memory debugging commands
             else if (command == "process-smi") {
-                if (!globalMemoryManager) {
+                if (!globalMemory) {
                     std::unique_lock<std::mutex> lock(prompt_mutex);
                     prompt_display_buffer = "Memory manager not initialized. Run 'initialize' first.";
                 } else {
-                    MemoryStats stats = globalMemoryManager->getStats();
-                    auto processMemInfo = globalMemoryManager->getAllProcessMemoryInfo();
+                    MemoryStats stats = globalMemory->getStats();
+                    auto processMemInfo = globalMemory->getAllProcessMemoryInfo();
                     
                     std::ostringstream oss;
                     oss << "=============================================\n";
@@ -415,11 +511,11 @@ void command_interpreter_thread_func() {
                 }
             }
             else if (command == "vmstat") {
-                if (!globalMemoryManager) {
+                if (!globalMemory) {
                     std::unique_lock<std::mutex> lock(prompt_mutex);
                     prompt_display_buffer = "Memory manager not initialized. Run 'initialize' first.";
                 } else {
-                    MemoryStats stats = globalMemoryManager->getStats();
+                    MemoryStats stats = globalMemory->getStats();
                     
                     // Convert bytes to MiB
                     size_t totalMiB = stats.totalMemory / (1024 * 1024);
@@ -450,6 +546,7 @@ void command_interpreter_thread_func() {
                     "Available commands:\n"
                     "initialize - read config.txt\n"
                     "screen -s <name> <mem_size> - create process (mem_size: 64-65536, power of 2)\n"
+                    "screen -c <name> <mem_size> \"<instructions>\" - create process with custom instructions\n"
                     "screen -ls - list processes\n"
                     "screen -r <name> - attach to process\n"
                     "scheduler-start - start scheduler\n"

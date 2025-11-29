@@ -63,6 +63,11 @@ struct ProcessControlBlock {
     std::unordered_map<std::string, size_t> symbolTable;  // Variable name -> offset in symbol table segment
     size_t nextSymbolOffset = 0;                       // Next available offset in symbol table (0-62, step 2)
     
+    // Memory violation tracking
+    bool hasMemoryViolation = false;
+    std::string memoryViolationTime;
+    size_t memoryViolationAddress = 0;
+    
     // Initialize process memory with given size
     void initializeMemory(size_t size) {
         processMemory.resize(size, 0);  // Zero-initialized

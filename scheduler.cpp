@@ -1,7 +1,7 @@
 #include "utils.h"
 #include "process.h"
 #include "globals.h"
-#include "memory_manager.h"
+#include "memory.h"
 #include <random>
 #include <memory>
 #include <string>
@@ -203,8 +203,8 @@ void scheduler_start() {
 
                 if (pcb->processState == State::TERMINATED) {
                     // Deallocate memory for terminated process
-                    if (globalMemoryManager) {
-                        globalMemoryManager->deallocateProcess(pcb->process->pid);
+                    if (globalMemory) {
+                        globalMemory->deallocateProcess(pcb->process->pid);
                     }
                     
                     std::unique_lock<std::mutex> lock(process_table_mutex);
@@ -235,8 +235,8 @@ void scheduler_test() {
             
             // Allocate memory for the process
             bool allocated = true;
-            if (globalMemoryManager) {
-                allocated = globalMemoryManager->allocateProcess(pcb->process->pid, 256);
+            if (globalMemory) {
+                allocated = globalMemory->allocateProcess(pcb->process->pid, 256);
             }
             
             if (allocated) {
@@ -275,10 +275,10 @@ void scheduler_stop() {
     {
         std::unique_lock<std::mutex> lock(process_table_mutex);
         for (auto &kv : process_table) {
-            // Deallocate memory for stopped processes
-            if (globalMemoryManager) {
-                globalMemoryManager->deallocateProcess(kv.second->process->pid);
-            }
+                    // Deallocate memory for stopped processes
+                    if (globalMemory) {
+                        globalMemory->deallocateProcess(kv.second->process->pid);
+                    }
             finished_processes.push_back(kv.second);
         }
         process_table.clear();

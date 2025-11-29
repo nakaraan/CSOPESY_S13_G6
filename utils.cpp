@@ -189,3 +189,115 @@ void enable_windows_ansi() {
     SetConsoleMode(hOut, mode);
 }
 #endif
+
+// Parse user-defined instructions from command string
+#include "process.h"
+#include <sstream>
+#include <algorithm>
+#include <cctype>
+
+static std::string trim(const std::string& str) {
+    size_t start = 0;
+    while (start < str.size() && std::isspace(str[start])) start++;
+    size_t end = str.size();
+    while (end > start && std::isspace(str[end - 1])) end--;
+    return str.substr(start, end - start);
+}
+
+static std::vector<std::string> splitByDelimiter(const std::string& str, char delim) {
+    std::vector<std::string> tokens;
+    std::string current;
+    bool inQuotes = false;
+    
+    for (char c : str) {
+        if (c == '"') {
+            inQuotes = !inQuotes;
+            current += c;
+        } else if (c == delim && !inQuotes) {
+            if (!current.empty()) {
+                tokens.push_back(trim(current));
+                current.clear();
+            }
+        } else {
+            current += c;
+        }
+    }
+    
+    if (!current.empty()) {
+        tokens.push_back(trim(current));
+    }
+    
+    return tokens;
+}
+
+std::vector<Instruction> parseUserInstructions(const std::string& instructionString) {
+    std::vector<Instruction> instructions;
+    
+    // Split by semicolon
+    std::vector<std::string> instrLines = splitByDelimiter(instructionString, ';');
+    
+    for (const auto& line : instrLines) {
+        if (line.empty()) continue;
+        
+        std::istringstream iss(line);
+        std::string cmd;
+        iss >> cmd;
+        
+        // Convert to uppercase for comparison
+        std::string upperCmd = cmd;
+        for (char& c : upperCmd) c = std::toupper(c);
+        
+        Instruction instr;
+        
+        if (upperCmd == "PRINT") {
+            instr.type = PRINT;
+            // Get rest of line as print argument
+            std::string rest;
+            std::getline(iss, rest);
+            instr.arg1 = trim(rest);
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "DECLARE") {
+            instr.type = DECLARE;
+            iss >> instr.arg1 >> instr.val1;
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "ADD") {
+            instr.type = ADD;
+            iss >> instr.arg1 >> instr.arg2 >> instr.arg3;
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "SUBTRACT") {
+            instr.type = SUBTRACT;
+            iss >> instr.arg1 >> instr.arg2 >> instr.arg3;
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "WRITE") {
+            instr.type = WRITE_MEM;
+            std::string addrStr;
+            iss >> addrStr >> instr.arg2;  // WRITE <address> <variable>
+            size_t addr;
+            if (parse_hex_address(addrStr, addr)) {
+                instr.arg1 = addrStr;  // Store hex address string
+            }
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "READ") {
+            instr.type = READ_MEM;
+            std::string addrStr;
+            iss >> instr.arg1 >> addrStr;  // READ <variable> <address>
+            size_t addr;
+            if (parse_hex_address(addrStr, addr)) {
+                instr.arg2 = addrStr;  // Store hex address string
+            }
+            instructions.push_back(instr);
+        }
+        else if (upperCmd == "SLEEP") {
+            instr.type = SLEEP;
+            iss >> instr.val1;
+            instructions.push_back(instr);
+        }
+    }
+    
+    return instructions;
+}

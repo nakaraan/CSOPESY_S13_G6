@@ -21,6 +21,10 @@ bool is_valid_memory_size(size_t size);
 bool parse_hex_address(const std::string& hexStr, size_t& outAddress);
 bool parse_integer(const std::string& str, int& outValue);
 
+// Instruction parsing
+struct Instruction;
+std::vector<Instruction> parseUserInstructions(const std::string& instructionString);
+
 #ifndef _WIN32
 void enable_raw_mode();
 void disable_raw_mode();
