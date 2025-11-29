@@ -15,6 +15,12 @@ int generate_pid();
 std::string generate_process_name();
 void handle_sigint(int);
 
+// Memory validation helpers
+bool is_power_of_two(size_t n);
+bool is_valid_memory_size(size_t size);
+bool parse_hex_address(const std::string& hexStr, size_t& outAddress);
+bool parse_integer(const std::string& str, int& outValue);
+
 #ifndef _WIN32
 void enable_raw_mode();
 void disable_raw_mode();

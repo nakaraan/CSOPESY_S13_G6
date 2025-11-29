@@ -2,18 +2,20 @@
 #include "globals.h"
 #include "utils.h"
 #include "process.h"
+#include "memory_manager.h"
 #include <thread>
 #include <chrono>
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <iomanip>
 
 // Forward declaration from scheduler.cpp
 void scheduler_start();
 void scheduler_test();
 void scheduler_stop();
 bool is_scheduler_active();
-std::shared_ptr<ProcessControlBlock> generate_random_process();
+std::shared_ptr<ProcessControlBlock> generate_random_process(size_t memorySize = 256);
 
 void command_interpreter_thread_func() {
     while (is_running) {
@@ -58,7 +60,15 @@ void command_interpreter_thread_func() {
                         else if (key == "min-ins") { iss >> min_ins; }
                         else if (key == "max-ins") { iss >> max_ins; }
                         else if (key == "delay-per-exec") { iss >> delay_per_exec; }
+                        else if (key == "max-overall-mem") { iss >> max_overall_mem; }
+                        else if (key == "mem-per-frame") { iss >> mem_per_frame; }
+                        else if (key == "min-mem-per-proc") { iss >> min_mem_per_proc; }
+                        else if (key == "max-mem-per-proc") { iss >> max_mem_per_proc; }
                     }
+                    
+                    // Initialize memory manager with max_overall_mem converted to bytes
+                    initializeMemoryManager(max_overall_mem * 1024 * 1024);
+                    
                     initialized = true;
                     scheduler_start();
                     std::unique_lock<std::mutex> lock(prompt_mutex);
@@ -73,10 +83,65 @@ void command_interpreter_thread_func() {
             // Screen commands
             else if (command == "screen") {
                 if (tokens.size() > 1) {
-                    if (tokens[1] == "-s" && tokens.size() > 2) {
+                    if (tokens[1] == "-s" && tokens.size() > 3) {
+                        // screen -s <process_name> <process_memory_size>
                         std::string pname = tokens[2];
-                        auto pcb = generate_random_process();
+                        std::string pmemsize_str = tokens[3];
+                        
+                        // Parse memory size
+                        int pmemsize_int = 0;
+                        if (!parse_integer(pmemsize_str, pmemsize_int) || pmemsize_int < 0) {
+                            std::unique_lock<std::mutex> lock(prompt_mutex);
+                            prompt_display_buffer = "invalid memory allocation";
+                        }
+                        else {
+                            size_t pmemsize = static_cast<size_t>(pmemsize_int);
+                            
+                            // Validate memory size: must be power of 2, in range [64, 65536]
+                            if (!is_valid_memory_size(pmemsize)) {
+                                std::unique_lock<std::mutex> lock(prompt_mutex);
+                                prompt_display_buffer = "invalid memory allocation";
+                            }
+                            else {
+                                // Valid memory size, create process
+                                auto pcb = generate_random_process(pmemsize);
+                                pcb->process->name = pname;
+                                
+                                // Allocate memory for the process
+                                if (globalMemoryManager) {
+                                    if (!globalMemoryManager->allocateProcess(pcb->process->pid, pmemsize)) {
+                                        std::unique_lock<std::mutex> lock(prompt_mutex);
+                                        prompt_display_buffer = "Failed to allocate memory for process " + pname;
+                                        continue;
+                                    }
+                                }
+                                
+                                {
+                                    std::unique_lock<std::mutex> lock(process_table_mutex);
+                                    process_table[pname] = pcb;
+                                    ready_queue.push(pcb);
+                                }
+                                ready_cv.notify_one();
+                                std::unique_lock<std::mutex> lock(prompt_mutex);
+                                prompt_display_buffer = "Process " + pname + " created with " + std::to_string(pmemsize) + " bytes.";
+                            }
+                        }
+                    }
+                    else if (tokens[1] == "-s" && tokens.size() > 2) {
+                        // screen -s <process_name> (no memory size - use default 256)
+                        std::string pname = tokens[2];
+                        auto pcb = generate_random_process(256);  // Default 256 bytes
                         pcb->process->name = pname;
+                        
+                        // Allocate memory for the process
+                        if (globalMemoryManager) {
+                            if (!globalMemoryManager->allocateProcess(pcb->process->pid, 256)) {
+                                std::unique_lock<std::mutex> lock(prompt_mutex);
+                                prompt_display_buffer = "Failed to allocate memory for process " + pname;
+                                continue;
+                            }
+                        }
+                        
                         {
                             std::unique_lock<std::mutex> lock(process_table_mutex);
                             process_table[pname] = pcb;
@@ -84,7 +149,7 @@ void command_interpreter_thread_func() {
                         }
                         ready_cv.notify_one();
                         std::unique_lock<std::mutex> lock(prompt_mutex);
-                        prompt_display_buffer = "Process " + pname + " created.";
+                        prompt_display_buffer = "Process " + pname + " created with 256 bytes (default).";
                     }
                     else if (tokens[1] == "-ls") {
                         // Pause auto-refresh so user can scroll through the list
@@ -238,7 +303,7 @@ void command_interpreter_thread_func() {
                     }
                 } else {
                     std::unique_lock<std::mutex> lock(prompt_mutex);
-                    prompt_display_buffer = "Usage: screen -s <name> | screen -ls | screen -r <name>";
+                    prompt_display_buffer = "Usage: screen -s <name> [mem_size] | screen -ls | screen -r <name>";
                 }
             }
             // Scheduler commands
@@ -294,18 +359,104 @@ void command_interpreter_thread_func() {
                     prompt_display_buffer = "Report generated at csopesy-log.txt";
                 }
             }
-            // Original commands (preserved)
+            // Memory debugging commands
+            else if (command == "process-smi") {
+                if (!globalMemoryManager) {
+                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                    prompt_display_buffer = "Memory manager not initialized. Run 'initialize' first.";
+                } else {
+                    MemoryStats stats = globalMemoryManager->getStats();
+                    auto processMemInfo = globalMemoryManager->getAllProcessMemoryInfo();
+                    
+                    std::ostringstream oss;
+                    oss << "=============================================\n";
+                    oss << " PROCESS-SMI " << get_timestamp() << "\n";
+                    oss << "=============================================\n";
+                    oss << "CPU-Util: " << (std::min((int)process_table.size(), num_cpu) * 100 / std::max(1, num_cpu)) << "%\n";
+                    
+                    // Convert bytes to MiB (1 MiB = 1024*1024 bytes)
+                    size_t usedMiB = stats.usedMemory / (1024 * 1024);
+                    size_t totalMiB = stats.totalMemory / (1024 * 1024);
+                    
+                    oss << "Memory Usage: " << usedMiB << "MiB / " << totalMiB << "MiB\n";
+                    oss << "Memory Util: " << (totalMiB > 0 ? (usedMiB * 100 / totalMiB) : 0) << "%\n";
+                    oss << "=============================================\n";
+                    oss << "Running processes and memory usage:\n";
+                    oss << "---------------------------------------------\n";
+                    
+                    if (processMemInfo.empty()) {
+                        oss << "No processes currently allocated in memory.\n";
+                    } else {
+                        // Look up process names from process table
+                        std::unique_lock<std::mutex> lock(process_table_mutex);
+                        for (const auto& info : processMemInfo) {
+                            int pid = info.first;
+                            size_t memBytes = info.second;
+                            size_t memMiB = memBytes / (1024 * 1024);
+                            if (memMiB == 0 && memBytes > 0) memMiB = 1; // Show at least 1 MiB if not zero
+                            
+                            // Find process name by PID
+                            std::string processName = "process" + std::to_string(pid);
+                            for (const auto& kv : process_table) {
+                                if (kv.second->process->pid == pid) {
+                                    processName = kv.first;
+                                    break;
+                                }
+                            }
+                            
+                            oss << std::setw(15) << std::left << processName 
+                                << std::setw(10) << std::right << memMiB << "MiB\n";
+                        }
+                    }
+                    oss << "=============================================\n";
+                    
+                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                    prompt_display_buffer = oss.str();
+                }
+            }
+            else if (command == "vmstat") {
+                if (!globalMemoryManager) {
+                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                    prompt_display_buffer = "Memory manager not initialized. Run 'initialize' first.";
+                } else {
+                    MemoryStats stats = globalMemoryManager->getStats();
+                    
+                    // Convert bytes to MiB
+                    size_t totalMiB = stats.totalMemory / (1024 * 1024);
+                    size_t usedMiB = stats.usedMemory / (1024 * 1024);
+                    size_t freeMiB = stats.freeMemory / (1024 * 1024);
+                    
+                    std::ostringstream oss;
+                    oss << "=============================================\n";
+                    oss << " VMSTAT " << get_timestamp() << "\n";
+                    oss << "=============================================\n";
+                    oss << "Total memory: " << totalMiB << " MiB\n";
+                    oss << "Used memory:  " << usedMiB << " MiB\n";
+                    oss << "Free memory:  " << freeMiB << " MiB\n";
+                    oss << "Idle cpu ticks: " << stats.idleCpuTicks << "\n";
+                    oss << "Active cpu ticks: " << stats.activeCpuTicks << "\n";
+                    oss << "Total cpu ticks: " << (stats.idleCpuTicks + stats.activeCpuTicks) << "\n";
+                    oss << "Num paged in: " << stats.numPagedIn << "\n";
+                    oss << "Num paged out: " << stats.numPagedOut << "\n";
+                    oss << "=============================================\n";
+                    
+                    std::unique_lock<std::mutex> lock(prompt_mutex);
+                    prompt_display_buffer = oss.str();
+                }
+            }
             else if (command == "help") {
                 std::unique_lock<std::mutex> lock(prompt_mutex);
                 prompt_display_buffer =
                     "Available commands:\n"
                     "initialize - read config.txt\n"
-                    "screen -s <name> - create process\n"
+                    "screen -s <name> <mem_size> - create process (mem_size: 64-65536, power of 2)\n"
                     "screen -ls - list processes\n"
                     "screen -r <name> - attach to process\n"
                     "scheduler-start - start scheduler\n"
                     "scheduler-stop - stop scheduler\n"
                     "report-util - generate report\n"
+                    "process-smi - show memory and process info\n"
+                    "vmstat - show virtual memory statistics\n"
                     "start_marquee - start animation\n"
                     "stop_marquee - stop animation\n"
                     "set_text <text> - set marquee text\n"

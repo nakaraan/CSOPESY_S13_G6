@@ -43,6 +43,10 @@ extern int batch_process_freq;
 extern int min_ins;
 extern int max_ins;
 extern int delay_per_exec;
+extern size_t max_overall_mem;      // Maximum overall memory (e.g., 4096 for 4GB)
+extern size_t mem_per_frame;         // Memory per frame (page size)
+extern size_t min_mem_per_proc;      // Minimum memory per process
+extern size_t max_mem_per_proc;      // Maximum memory per process
 
 // process management
 extern std::unordered_map<std::string, std::shared_ptr<ProcessControlBlock>> process_table;

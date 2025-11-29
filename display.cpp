@@ -20,17 +20,13 @@ void clear_screen() {
 
     if (hConsole == INVALID_HANDLE_VALUE) return;
 
-    // Get console size
     if (!GetConsoleScreenBufferInfo(hConsole, &csbi)) return;
     cellCount = csbi.dwSize.X * csbi.dwSize.Y;
 
-    // Fill screen with spaces
     if (!FillConsoleOutputCharacter(hConsole, (TCHAR)' ', cellCount, homeCoords, &count)) return;
 
-    // Fill screen with current attributes
     if (!FillConsoleOutputAttribute(hConsole, csbi.wAttributes, cellCount, homeCoords, &count)) return;
 
-    // Move cursor to home
     SetConsoleCursorPosition(hConsole, homeCoords);
 #else
     // Use ANSI escape codes for POSIX systems
@@ -53,10 +49,8 @@ void display_thread_func() {
             int pos = marquee_position;
             std::string padded = marquee_text + std::string(display_width, ' ');
             if (padded.empty()) padded = std::string(display_width, ' ');
-            // ensure pos within range
             if (pos < 0) pos = 0;
             if (pos >= (int)padded.size()) {
-                // If position beyond padded, show blank area
                 text_to_show = std::string(display_width, ' ');
             } else {
                 // If substring requested crosses end, concatenate from start

@@ -37,6 +37,10 @@ int batch_process_freq = 1;
 int min_ins = 1000;
 int max_ins = 2000;
 int delay_per_exec = 0;
+size_t max_overall_mem = 4096;      // Default 4GB in MiB
+size_t mem_per_frame = 4;            // Default 4KB page size (in KB)
+size_t min_mem_per_proc = 64;        // Minimum 64 bytes per process
+size_t max_mem_per_proc = 256;       // Maximum 256 bytes per process
 
 // Process management definitions
 std::unordered_map<std::string, std::shared_ptr<ProcessControlBlock>> process_table;

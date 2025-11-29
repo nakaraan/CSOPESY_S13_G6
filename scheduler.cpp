@@ -1,6 +1,7 @@
 #include "utils.h"
 #include "process.h"
 #include "globals.h"
+#include "memory_manager.h"
 #include <random>
 #include <memory>
 #include <string>
@@ -21,7 +22,7 @@ bool is_scheduler_active() {
     return scheduler_active;
 }
 
-std::shared_ptr<ProcessControlBlock> generate_random_process() {
+std::shared_ptr<ProcessControlBlock> generate_random_process(size_t memorySize) {
     std::random_device rd;
     std::mt19937 gen(rd());
     
@@ -32,7 +33,11 @@ std::shared_ptr<ProcessControlBlock> generate_random_process() {
     pcb->process = std::make_unique<Process>();
     pcb->process->pid = generate_pid();
     pcb->process->name = generate_process_name();
+    pcb->process->memorySize = memorySize;
     pcb->processState = State::READY;
+    
+    // Initialize process memory buffer
+    pcb->initializeMemory(memorySize);
 
     // Initialize variable x to 0
     pcb->memory["x"] = 0;
@@ -197,6 +202,11 @@ void scheduler_start() {
                 }
 
                 if (pcb->processState == State::TERMINATED) {
+                    // Deallocate memory for terminated process
+                    if (globalMemoryManager) {
+                        globalMemoryManager->deallocateProcess(pcb->process->pid);
+                    }
+                    
                     std::unique_lock<std::mutex> lock(process_table_mutex);
                     finished_processes.push_back(pcb);
                     process_table.erase(pcb->process->name);
@@ -221,13 +231,22 @@ void scheduler_test() {
     
     generator_thread = std::thread([](){
         while (scheduler_running && is_running) {
-            auto pcb = generate_random_process();
-            {
-                std::unique_lock<std::mutex> lock(process_table_mutex);
-                process_table[pcb->process->name] = pcb;
-                ready_queue.push(pcb);
+            auto pcb = generate_random_process(256);  // Default 256 bytes for auto-generated processes
+            
+            // Allocate memory for the process
+            bool allocated = true;
+            if (globalMemoryManager) {
+                allocated = globalMemoryManager->allocateProcess(pcb->process->pid, 256);
             }
-            ready_cv.notify_one();
+            
+            if (allocated) {
+                {
+                    std::unique_lock<std::mutex> lock(process_table_mutex);
+                    process_table[pcb->process->name] = pcb;
+                    ready_queue.push(pcb);
+                }
+                ready_cv.notify_one();
+            }
 
             for (int i = 0; i < std::max(1, batch_process_freq) && scheduler_running && is_running; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -256,6 +275,10 @@ void scheduler_stop() {
     {
         std::unique_lock<std::mutex> lock(process_table_mutex);
         for (auto &kv : process_table) {
+            // Deallocate memory for stopped processes
+            if (globalMemoryManager) {
+                globalMemoryManager->deallocateProcess(kv.second->process->pid);
+            }
             finished_processes.push_back(kv.second);
         }
         process_table.clear();

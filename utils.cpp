@@ -1,12 +1,12 @@
 // utils.cpp
 #include "utils.h"
-#include "globals.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
 #include <csignal>
 #include <iomanip>
 #include <chrono>
+#include <atomic>
 #ifndef _WIN32
 #include <unistd.h>
 #include <termios.h>
@@ -19,6 +19,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
+// Forward declaration of global variable from globals.cpp
+extern std::atomic<bool> is_running;
 
 std::string to_lowercase(const std::string &s) {
     std::string result = s;
@@ -80,6 +83,54 @@ std::string generate_process_name() {
     std::ostringstream oss;
     oss << "p" << std::setw(2) << std::setfill('0') << process_name++;
     return oss.str();
+}
+
+// Check if a number is a power of 2
+bool is_power_of_two(size_t n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
+
+// Validate memory size: must be power of 2, in range [64, 65536]
+bool is_valid_memory_size(size_t size) {
+    if (size < 64 || size > 65536) return false;
+    return is_power_of_two(size);
+}
+
+// Parse hexadecimal string (with or without 0x prefix) to size_t
+bool parse_hex_address(const std::string& hexStr, size_t& outAddress) {
+    if (hexStr.empty()) return false;
+    
+    std::string str = hexStr;
+    // Remove 0x or 0X prefix if present
+    if (str.size() >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        str = str.substr(2);
+    }
+    
+    if (str.empty()) return false;
+    
+    // Check all characters are valid hex digits
+    for (char c : str) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    }
+    
+    try {
+        outAddress = std::stoull(str, nullptr, 16);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Parse integer string to int
+bool parse_integer(const std::string& str, int& outValue) {
+    if (str.empty()) return false;
+    try {
+        size_t pos;
+        outValue = std::stoi(str, &pos);
+        return pos == str.size();  // Ensure entire string was consumed
+    } catch (...) {
+        return false;
+    }
 }
 
 // Simple SIGINT handler to cleanup nicely

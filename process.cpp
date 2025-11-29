@@ -132,6 +132,34 @@ void execute_instruction(ProcessControlBlock& pcb, int core_id) {
             // can be nested up to 3 times
             break;
         }
+        case READ_MEM: {
+            // READ var memory_address
+            // Reads UINT16 from memory address and stores in variable
+            std::string varName = instruction.arg1;
+            size_t address = instruction.val1;  // Memory address stored in val1
+            
+            // Read value from memory address
+            uint16_t value = pcb.readMemoryAddress(address);
+            
+            // Store in variable (symbol table)
+            if (!pcb.writeVariable(varName, value)) {
+                pcb.logs.push_back(log_format(core_id, "Error: Symbol table full, cannot create variable " + varName));
+            }
+            break;
+        }
+        case WRITE_MEM: {
+            // WRITE memory_address value
+            // Writes UINT16 value to memory address
+            size_t address = instruction.val1;  // Memory address stored in val1
+            uint16_t value = instruction.val2;  // Value stored in val2
+            
+            // Write value to memory address
+            if (!pcb.writeMemoryAddress(address, value)) {
+                pcb.logs.push_back(log_format(core_id, "Error: Memory write failed at address 0x" + 
+                    std::to_string(address)));
+            }
+            break;
+        }
     }
 
     if (pcb.processState == State::BLOCKED || pcb.processState == State::TERMINATED)
