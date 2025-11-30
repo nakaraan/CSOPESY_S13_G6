@@ -17,12 +17,9 @@
 ### Option 2 - Windows Command Prompt
 - Open the command prompt
 - Compile and run with the following commands:
-```bash
-g++ main.cpp utils.cpp keyboard.cpp interpreter.cpp display.cpp marquee.cpp globals.cpp -o main.exe -pthread
-```
-```bash
-main.exe
-```
+"g++ main.cpp utils.cpp keyboard.cpp interpreter.cpp display.cpp marquee.cpp globals.cpp -o main.exe -pthread" 
+enter then "main.exe"
+
 
 ### Option 3 - VS Developer Command Prompt
 - Open "x64 Native Tools Command Prompt for VS <version>"
