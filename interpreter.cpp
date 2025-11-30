@@ -241,7 +241,7 @@ void command_interpreter_thread_func() {
                                 cores_used = 0;
                                 cores_available = num_cpu;
                             } else {
-                                cores_used = std::min((int)process_table.size(), num_cpu);
+                                cores_used = active_cores.load();
                                 cores_available = num_cpu - cores_used;
                             }
                             
@@ -426,7 +426,7 @@ void command_interpreter_thread_func() {
                     prompt_display_buffer = "Failed to write report file.";
                 } else {
                     std::unique_lock<std::mutex> lock(process_table_mutex);
-                    int cores_used = std::min((int)process_table.size(), num_cpu);
+                    int cores_used = active_cores.load();
                     int cores_available = num_cpu - cores_used;
                     
                     ofs << "CPU utilization: " << (cores_used * 100 / std::max(1, num_cpu)) << "%\n";
@@ -468,7 +468,7 @@ void command_interpreter_thread_func() {
                     oss << "=============================================\n";
                     oss << " PROCESS-SMI " << get_timestamp() << "\n";
                     oss << "=============================================\n";
-                    oss << "CPU-Util: " << (std::min((int)process_table.size(), num_cpu) * 100 / std::max(1, num_cpu)) << "%\n";
+                    oss << "CPU-Util: " << (active_cores.load() * 100 / std::max(1, num_cpu)) << "%\n";
                     
                     // Convert bytes to MiB (1 MiB = 1024*1024 bytes)
                     size_t usedMiB = stats.usedMemory / (1024 * 1024);

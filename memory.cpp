@@ -61,6 +61,7 @@ void Memory::deallocateProcess(int processId) {
             frames[fi].lastAccessTime = 0;
             freeFrameList.push_back(fi);
             stats.freeMemory += PAGE_SIZE;
+            if (stats.usedMemory >= PAGE_SIZE) stats.usedMemory -= PAGE_SIZE;
         }
     }
     pageTables.erase(it);
@@ -110,11 +111,14 @@ void Memory::removePage(int frameIndex) {
     f.lastAccessTime = 0;
     freeFrameList.push_back(frameIndex);
     stats.freeMemory += PAGE_SIZE;
+    if (stats.usedMemory >= PAGE_SIZE) stats.usedMemory -= PAGE_SIZE;
 }
 
 void Memory::loadPage(int processId, size_t pageNumber, int frameIndex) {
     (void)processId; (void)pageNumber; (void)frameIndex;
     stats.numPagedIn++;
+    stats.usedMemory += PAGE_SIZE;
+    if (stats.freeMemory >= PAGE_SIZE) stats.freeMemory -= PAGE_SIZE;
 }
 
 void Memory::writePageToBackingStore(int processId, size_t pageNumber, const std::vector<uint8_t>& pageData) {

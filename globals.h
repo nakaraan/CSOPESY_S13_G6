@@ -56,5 +56,6 @@ extern std::mutex process_table_mutex;
 extern std::condition_variable ready_cv;
 extern bool initialized;
 extern std::atomic<int> cpuCycles;
+extern std::atomic<int> active_cores; // Number of cores currently executing
 
 #endif

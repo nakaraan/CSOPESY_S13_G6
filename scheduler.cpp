@@ -8,6 +8,8 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <sstream>
+#include <iomanip>
 
 // Forward declaration
 Instruction generate_random_instruction(int currentDepth, std::vector<std::string> declared_vars);
@@ -43,10 +45,31 @@ std::shared_ptr<ProcessControlBlock> generate_random_process(size_t memorySize) 
     pcb->memory["x"] = 0;
 
     int num_instructions = instruction_distrib(gen);
+    std::uniform_int_distribution<> mem_addr_distrib(0, static_cast<int>(memorySize - 1));
+    
     for (int i = 0; i < num_instructions; ++i) {
         Instruction instruction;
         
-        if (i % 2 == 0) {
+        // Generate different instruction types to trigger memory operations
+        int instrType = i % 4;
+        
+        if (instrType == 0) {
+            // WRITE_MEM instruction: Write x to memory
+            instruction.type = WRITE_MEM;
+            size_t addr = mem_addr_distrib(gen);
+            std::stringstream ss;
+            ss << "0x" << std::hex << addr;
+            instruction.arg1 = ss.str();  // hex address string
+            instruction.arg2 = "x";        // variable to write
+        } else if (instrType == 1) {
+            // READ_MEM instruction: Read from memory to x
+            instruction.type = READ_MEM;
+            size_t addr = mem_addr_distrib(gen);
+            std::stringstream ss;
+            ss << "0x" << std::hex << addr;
+            instruction.arg1 = "x";        // variable to read into
+            instruction.arg2 = ss.str();   // hex address string
+        } else if (instrType == 2) {
             // PRINT instruction
             instruction.type = PRINT;
             instruction.arg2 = "Value from: x";
@@ -169,7 +192,11 @@ void scheduler_start() {
                     std::unique_lock<std::mutex> lock(process_table_mutex);
                     if (ready_queue.empty()) {
                         ready_cv.wait_for(lock, std::chrono::milliseconds(10));
-                        if (ready_queue.empty()) continue;
+                        if (ready_queue.empty()) {
+                            // Track idle CPU tick when no process to run
+                            if (globalMemory) globalMemory->updateCpuTicks(true);
+                            continue;
+                        }
                     }
                     if (!ready_queue.empty()) {
                         pcb = ready_queue.front();
@@ -177,6 +204,9 @@ void scheduler_start() {
                     }
                 }
                 if (!pcb) continue;
+
+                active_cores++; // Mark core as active
+                if (globalMemory) globalMemory->updateCpuTicks(false); // Track active CPU tick
 
                 if (scheduler_type == "rr") {
                     int quantum = std::max(1, quantum_cycles);
@@ -200,6 +230,9 @@ void scheduler_start() {
                         cpuCycles++;
                     }
                 }
+
+                active_cores--; // Mark core as idle
+                if (globalMemory) globalMemory->updateCpuTicks(true); // Track idle CPU tick
 
                 if (pcb->processState == State::TERMINATED) {
                     // Deallocate memory for terminated process

@@ -49,4 +49,4 @@ std::queue<std::shared_ptr<ProcessControlBlock>> ready_queue;
 std::mutex process_table_mutex;
 std::condition_variable ready_cv;
 bool initialized = false;
-std::atomic<int> cpuCycles{0};
+std::atomic<int> cpuCycles{0};std::atomic<int> active_cores{0}; // Number of cores currently executing a process
