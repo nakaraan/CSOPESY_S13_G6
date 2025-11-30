@@ -264,12 +264,16 @@ void scheduler_test() {
     
     generator_thread = std::thread([](){
         while (scheduler_running && is_running) {
-            auto pcb = generate_random_process(256);  // Default 256 bytes for auto-generated processes
+            // Use configured per-process memory from config (bytes)
+            size_t memLow = std::max<size_t>(64, min_mem_per_proc);
+            size_t memHigh = std::max(memLow, max_mem_per_proc);
+            size_t pmem = memHigh; // choose upper bound to stress paging
+            auto pcb = generate_random_process(pmem);
             
             // Allocate memory for the process
             bool allocated = true;
             if (globalMemory) {
-                allocated = globalMemory->allocateProcess(pcb->process->pid, 256);
+                allocated = globalMemory->allocateProcess(pcb->process->pid, pmem);
             }
             
             if (allocated) {
@@ -304,14 +308,12 @@ void scheduler_stop() {
     for (auto &t : core_threads) if (t.joinable()) t.join();
     core_threads.clear();
     
-    // Move any remaining processes to finished
+    // Move any remaining processes to finished WITHOUT deallocating memory
+    // (preserves deadlock state for process-smi inspection)
     {
         std::unique_lock<std::mutex> lock(process_table_mutex);
         for (auto &kv : process_table) {
-                    // Deallocate memory for stopped processes
-                    if (globalMemory) {
-                        globalMemory->deallocateProcess(kv.second->process->pid);
-                    }
+            // Do NOT deallocate - keep processes in memory for inspection
             finished_processes.push_back(kv.second);
         }
         process_table.clear();

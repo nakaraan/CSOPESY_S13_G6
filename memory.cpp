@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "globals.h"
 
 #include <fstream>
 #include <iostream>
@@ -7,10 +8,33 @@
 
 std::unique_ptr<Memory> globalMemory = nullptr;
 
+// ================= Backing Store Persistence Toggle =================
+// Set this to true to keep appending to the backing store across runs.
+// Set to false to truncate (clear) the backing store each time memory is initialized.
+// User can toggle this single boolean. No config.txt entry required.
+static const bool BACKING_STORE_PERSIST = false;
+// Optional maximum backing store size (in bytes) before auto-truncation (only when persisting)
+static const size_t BACKING_STORE_MAX_SIZE = 5 * 1024 * 1024; // 5 MiB cap
+
+// Returns actual page size from config (mem_per_frame is in KB, convert to bytes)
+inline size_t getPageSize() {
+    return (mem_per_frame > 0) ? (mem_per_frame * 1024) : 1024;
+}
+
 // initializes the memory manager along with the backing store file
 Memory::Memory(size_t totalMemory, const std::string& backingStore)
     : totalMemorySize(totalMemory), backingStoreFile(backingStore), currentTime(0) {
-    numFrames = static_cast<size_t>(totalMemorySize / PAGE_SIZE);
+    size_t pageSize = getPageSize();
+    numFrames = static_cast<size_t>(totalMemorySize / pageSize);
+    // Enforce single-process residency: cap total frames to per-process capacity
+    // Frames per process derived from max_mem_per_proc (KB) and page size (bytes)
+    if (max_mem_per_proc > 0) {
+        size_t framesPerProc = (max_mem_per_proc * 1024) / pageSize;
+        if (framesPerProc == 0) framesPerProc = 1;
+        if (numFrames > framesPerProc) {
+            numFrames = framesPerProc;
+        }
+    }
     if (numFrames == 0) numFrames = 1;
     frames.resize(numFrames);
     for (size_t i = 0; i < numFrames; ++i) {
@@ -22,7 +46,45 @@ Memory::Memory(size_t totalMemory, const std::string& backingStore)
         freeFrameList.push_back(static_cast<int>(i));
     }
     stats.totalMemory = totalMemorySize;
-    stats.freeMemory = numFrames * PAGE_SIZE;
+    stats.usedMemory = 0;
+    stats.freeMemory = totalMemorySize; // will be recomputed on getStats
+
+    // -------- Backing Store Initialization --------
+    if (!backingStoreFile.empty()) {
+        bool needHeader = false;
+        if (BACKING_STORE_PERSIST) {
+            // If persisting, check size; rotate/truncate if too large
+            std::ifstream ifs(backingStoreFile, std::ios::binary | std::ios::ate);
+            if (ifs.good()) {
+                auto size = static_cast<size_t>(ifs.tellg());
+                if (size > BACKING_STORE_MAX_SIZE) {
+                    // Truncate oversized file
+                    std::ofstream trunc(backingStoreFile, std::ios::trunc);
+                    needHeader = true;
+                } else if (size == 0) {
+                    needHeader = true; // Empty file
+                }
+            } else {
+                // File doesn't exist yet
+                needHeader = true;
+            }
+            ifs.close();
+            if (needHeader) {
+                std::ofstream ofs(backingStoreFile, std::ios::app);
+                if (ofs.good()) {
+                    ofs << "# CSOPESY Backing Store\n";
+                    ofs << "# Format: PID PAGE_NUM DATA\n";
+                }
+            }
+        } else {
+            // Not persisting: always truncate and write header
+            std::ofstream ofs(backingStoreFile, std::ios::trunc);
+            if (ofs.good()) {
+                ofs << "# CSOPESY Backing Store\n";
+                ofs << "# Format: PID PAGE_NUM DATA\n";
+            }
+        }
+    }
 }
 
 // cleans up memory manager resources 
@@ -36,7 +98,7 @@ void initializeMemory(size_t totalMemory) {
 // true = successful, false = process already exists
 bool Memory::allocateProcess(int processId, size_t processMemorySize) {
     std::lock_guard<std::mutex> lock(memoryMutex);
-    size_t pagesNeeded = (processMemorySize + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t pagesNeeded = (processMemorySize + getPageSize() - 1) / getPageSize();
     pageTables[processId] = std::vector<PageTableEntry>(pagesNeeded);
     for (size_t i = 0; i < pagesNeeded; ++i) {
         pageTables[processId][i].pageNumber = i;
@@ -55,13 +117,11 @@ void Memory::deallocateProcess(int processId) {
     for (auto &pte : it->second) {
         if (pte.isValid && pte.frameNumber >= 0 && static_cast<size_t>(pte.frameNumber) < frames.size()) {
             int fi = pte.frameNumber;
-            // resets the frame info to a free state
             frames[fi].processId = -1;
             frames[fi].isModified = false;
             frames[fi].lastAccessTime = 0;
             freeFrameList.push_back(fi);
-            stats.freeMemory += PAGE_SIZE;
-            if (stats.usedMemory >= PAGE_SIZE) stats.usedMemory -= PAGE_SIZE;
+            if (stats.usedMemory >= getPageSize()) stats.usedMemory -= getPageSize();
         }
     }
     pageTables.erase(it);
@@ -94,11 +154,14 @@ void Memory::removePage(int frameIndex) {
         if (pnum < pit->second.size()) {
             PageTableEntry &pageEntry = pit->second[pnum];
             if (pageEntry.isValid && pageEntry.frameNumber == frameIndex) {
-                if (f.isModified) {
-                    // write back
-                    std::vector<uint8_t> dummy(PAGE_SIZE, 0);
+                // Count eviction
+                stats.numPagedOut++;
+                // Write only if modified or not yet present in store
+                uint64_t key = (static_cast<uint64_t>(pid) << 32) | static_cast<uint64_t>(pnum);
+                if (frames[frameIndex].isModified || backingStorePresence.find(key) == backingStorePresence.end()) {
+                    std::vector<uint8_t> dummy(getPageSize(), 0);
                     writePageToBackingStore(pid, pnum, dummy);
-                    stats.numPagedOut++;
+                    backingStorePresence.insert(key);
                 }
                 pageEntry.isValid = false;
                 pageEntry.frameNumber = -1;
@@ -110,24 +173,37 @@ void Memory::removePage(int frameIndex) {
     f.isModified = false;
     f.lastAccessTime = 0;
     freeFrameList.push_back(frameIndex);
-    stats.freeMemory += PAGE_SIZE;
-    if (stats.usedMemory >= PAGE_SIZE) stats.usedMemory -= PAGE_SIZE;
+    if (stats.usedMemory >= getPageSize()) stats.usedMemory -= getPageSize();
 }
 
 void Memory::loadPage(int processId, size_t pageNumber, int frameIndex) {
     (void)processId; (void)pageNumber; (void)frameIndex;
     stats.numPagedIn++;
-    stats.usedMemory += PAGE_SIZE;
-    if (stats.freeMemory >= PAGE_SIZE) stats.freeMemory -= PAGE_SIZE;
+    stats.usedMemory += getPageSize();
+}
+
+// helper: encode bytes to hex string (compact text)
+static std::string toHex(const std::vector<uint8_t>& data) {
+    static const char* hexdigits = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(data.size() * 2);
+    for (uint8_t b : data) {
+        out.push_back(hexdigits[b >> 4]);
+        out.push_back(hexdigits[b & 0x0F]);
+    }
+    return out;
 }
 
 void Memory::writePageToBackingStore(int processId, size_t pageNumber, const std::vector<uint8_t>& pageData) {
-    (void)processId; (void)pageNumber; (void)pageData;
+    std::ofstream ofs(backingStoreFile, std::ios::app);
+    if (!ofs) return;
+    ofs << processId << " " << pageNumber << " ";
+    ofs << toHex(pageData) << "\n";
 }
 
 std::vector<uint8_t> Memory::readPageFromBackingStore(int processId, size_t pageNumber) {
     (void)processId; (void)pageNumber;
-    return std::vector<uint8_t>(PAGE_SIZE, 0);
+    return std::vector<uint8_t>(getPageSize(), 0);
 }
 
 bool Memory::accessMemory(int processId, size_t virtualAddress, bool isWrite) {
@@ -135,7 +211,7 @@ bool Memory::accessMemory(int processId, size_t virtualAddress, bool isWrite) {
     currentTime++; // increments the time for LRU demand paging
     auto it = pageTables.find(processId);
     if (it == pageTables.end()) return false;
-    size_t pageNumber = virtualAddress / PAGE_SIZE;
+    size_t pageNumber = virtualAddress / getPageSize();
     if (pageNumber >= it->second.size()) return false;
     PageTableEntry &pageEntry = it->second[pageNumber];
     if (!pageEntry.isValid) { // for page faults (aka page not in memory)
@@ -143,7 +219,6 @@ bool Memory::accessMemory(int processId, size_t virtualAddress, bool isWrite) {
         if (!freeFrameList.empty()) {
             frameIndex = freeFrameList.front();
             freeFrameList.pop_front();
-            stats.freeMemory -= PAGE_SIZE;
         } else {
             frameIndex = findOldestFrameLRU(); // if no free frames are available, find the oldest frame using LRU
             if (frameIndex < 0) return false;
@@ -152,7 +227,6 @@ bool Memory::accessMemory(int processId, size_t virtualAddress, bool isWrite) {
             if (!freeFrameList.empty()) { 
                 frameIndex = freeFrameList.front();
                 freeFrameList.pop_front();
-                stats.freeMemory -= PAGE_SIZE;
             } else {
                 return false;
             }
@@ -195,7 +269,10 @@ bool Memory::writeByte(int processId, size_t virtualAddress, uint8_t value) {
 
 MemoryStats Memory::getStats() const {
     std::lock_guard<std::mutex> lock(memoryMutex);
-    return stats;
+    MemoryStats copy = stats;
+    // Recompute free memory to avoid drift
+    if (copy.totalMemory >= copy.usedMemory) copy.freeMemory = copy.totalMemory - copy.usedMemory; else copy.freeMemory = 0;
+    return copy;
 }
 
 void Memory::updateCpuTicks(bool isIdle) {
@@ -208,14 +285,14 @@ size_t Memory::getProcessMemoryUsage(int processId) const {
     std::lock_guard<std::mutex> lock(memoryMutex);
     auto it = pageTables.find(processId);
     if (it == pageTables.end()) return 0;
-    return it->second.size() * PAGE_SIZE;
+    return it->second.size() * getPageSize();
 }
 
 std::vector<std::pair<int, size_t>> Memory::getAllProcessMemoryInfo() const {
     std::lock_guard<std::mutex> lock(memoryMutex);
     std::vector<std::pair<int, size_t>> out;
     for (const auto &kv : pageTables) { // calculate memory usage for stats by counting valid pages
-        out.emplace_back(kv.first, kv.second.size() * PAGE_SIZE);
+        out.emplace_back(kv.first, kv.second.size() * getPageSize());
     }
     return out;
 }

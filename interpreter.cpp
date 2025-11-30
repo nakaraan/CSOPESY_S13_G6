@@ -66,8 +66,8 @@ void command_interpreter_thread_func() {
                         else if (key == "max-mem-per-proc") { iss >> max_mem_per_proc; }
                     }
                     
-                    // Initialize memory manager with max_overall_mem converted to bytes
-                    initializeMemory(max_overall_mem * 1024 * 1024);
+                    // Initialize memory manager with max_overall_mem (KB) converted to bytes
+                    initializeMemory(max_overall_mem * 1024);
                     
                     initialized = true;
                     scheduler_start();
@@ -483,7 +483,7 @@ void command_interpreter_thread_func() {
                     if (processMemInfo.empty()) {
                         oss << "No processes currently allocated in memory.\n";
                     } else {
-                        // Look up process names from process table
+                        // Look up process names from process table AND finished processes
                         std::unique_lock<std::mutex> lock(process_table_mutex);
                         for (const auto& info : processMemInfo) {
                             int pid = info.first;
@@ -491,12 +491,21 @@ void command_interpreter_thread_func() {
                             size_t memMiB = memBytes / (1024 * 1024);
                             if (memMiB == 0 && memBytes > 0) memMiB = 1; // Show at least 1 MiB if not zero
                             
-                            // Find process name by PID
+                            // Find process name by PID (check both active and finished)
                             std::string processName = "process" + std::to_string(pid);
                             for (const auto& kv : process_table) {
                                 if (kv.second->process->pid == pid) {
                                     processName = kv.first;
                                     break;
+                                }
+                            }
+                            // Also check finished processes
+                            if (processName == "process" + std::to_string(pid)) {
+                                for (const auto& pcb : finished_processes) {
+                                    if (pcb->process->pid == pid) {
+                                        processName = pcb->process->name;
+                                        break;
+                                    }
                                 }
                             }
                             
@@ -517,18 +526,14 @@ void command_interpreter_thread_func() {
                 } else {
                     MemoryStats stats = globalMemory->getStats();
                     
-                    // Convert bytes to MiB
-                    size_t totalMiB = stats.totalMemory / (1024 * 1024);
-                    size_t usedMiB = stats.usedMemory / (1024 * 1024);
-                    size_t freeMiB = stats.freeMemory / (1024 * 1024);
-                    
+                    // Show values in BYTES (no unit conversion)
                     std::ostringstream oss;
                     oss << "=============================================\n";
                     oss << " VMSTAT " << get_timestamp() << "\n";
                     oss << "=============================================\n";
-                    oss << "Total memory: " << totalMiB << " MiB\n";
-                    oss << "Used memory:  " << usedMiB << " MiB\n";
-                    oss << "Free memory:  " << freeMiB << " MiB\n";
+                    oss << "Total memory: " << stats.totalMemory << " bytes\n";
+                    oss << "Used memory:  " << stats.usedMemory << " bytes\n";
+                    oss << "Free memory:  " << stats.freeMemory << " bytes\n";
                     oss << "Idle cpu ticks: " << stats.idleCpuTicks << "\n";
                     oss << "Active cpu ticks: " << stats.activeCpuTicks << "\n";
                     oss << "Total cpu ticks: " << (stats.idleCpuTicks + stats.activeCpuTicks) << "\n";

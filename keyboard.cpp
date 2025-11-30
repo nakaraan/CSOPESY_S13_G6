@@ -22,6 +22,11 @@ void keyboard_handler_thread_func() {
                 std::string line = current_input;
                 current_input.clear();
                 lock.unlock();
+                // Clear prompt display buffer when new command is entered
+                {
+                    std::unique_lock<std::mutex> plock(prompt_mutex);
+                    prompt_display_buffer = "";
+                }
                 std::unique_lock<std::mutex> qlock(command_queue_mutex);
                 command_queue.push(line);
             } else if (ch == 8 || ch == 127) { // Backspace
@@ -42,10 +47,15 @@ void keyboard_handler_thread_func() {
         ssize_t n = read(STDIN_FILENO, &c, 1);
         if (n > 0) {
             std::unique_lock<std::mutex> lock(input_mutex);
-            if (c == '\r' || c == '\n') {
+            if (c == '\n' || c == '\r') {
                 std::string line = current_input;
                 current_input.clear();
                 lock.unlock();
+                // Clear prompt display buffer when new command is entered
+                {
+                    std::unique_lock<std::mutex> plock(prompt_mutex);
+                    prompt_display_buffer = "";
+                }
                 std::unique_lock<std::mutex> qlock(command_queue_mutex);
                 command_queue.push(line);
             } else if (c == 127 || c == 8) { // Backspace

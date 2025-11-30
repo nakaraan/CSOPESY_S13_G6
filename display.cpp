@@ -37,7 +37,9 @@ void clear_screen() {
 void display_thread_func() {
     const int refresh_rate_ms = 400; 
     const int display_width = 40;
-
+    std::string last_prompt_message; // cache to prevent redundant heavy redraws
+    size_t last_rendered_lines = 0;   // total lines last full render produced
+    bool last_was_heavy_panel = false;
     while (is_running) {
         std::string text_to_show;
         std::string prompt_message;
@@ -76,14 +78,61 @@ void display_thread_func() {
             input_snapshot = current_input;
         }
 
-        // Only clear and refresh if not paused (i.e., not in a submenu)
-        if (!pause_display_refresh) {
+        // Decide if the current prompt content is a heavy multi-line static panel
+        bool is_heavy_panel = (prompt_message.find("PROCESS-SMI") != std::string::npos) ||
+                              (prompt_message.find("VMSTAT") != std::string::npos);
+        bool prompt_changed = (prompt_message != last_prompt_message);
+
+        // Only clear and redraw fully if:
+        //  - not paused AND
+        //  - prompt changed OR not heavy panel (marquee/status updates)
+        if (!pause_display_refresh && (prompt_changed || !is_heavy_panel)) {
             clear_screen();
             std::cout << "=========  OS Marquee Emulator  ========\n\n";
             std::cout << text_to_show << "\n\n";
             std::cout << "Type 'help' for commands.\n\n";
             std::cout << prompt_message << "\n";
-            std::cout << "root:\\> " << input_snapshot << std::flush; // show typed text
+            std::cout << "root:\\> " << input_snapshot << std::flush;
+            last_prompt_message = prompt_message; // update cache after redraw
+            // Approximate line count for cursor math
+            size_t panel_lines = 0;
+            panel_lines += 2; // header + blank
+            panel_lines += 2; // marquee + blank
+            panel_lines += 2; // help + blank
+            // count lines inside prompt_message
+            panel_lines += 1; // at least one line
+            for (char c : prompt_message) if (c == '\n') panel_lines++;
+            panel_lines += 1; // prompt line itself
+            last_rendered_lines = panel_lines;
+            last_was_heavy_panel = is_heavy_panel;
+        }
+        // If heavy panel unchanged, do not redraw entire panel, only update input line so user can type.
+        else if (!pause_display_refresh && is_heavy_panel && !prompt_changed) {
+            // Update just the prompt/input line in place.
+#ifdef _WIN32
+            HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+            if (hConsole != INVALID_HANDLE_VALUE) {
+                // Move cursor to start of prompt line (last_rendered_lines - 1)
+                CONSOLE_SCREEN_BUFFER_INFO csbi; 
+                if (GetConsoleScreenBufferInfo(hConsole, &csbi)) {
+                    SHORT targetRow = (SHORT)std::min((int)csbi.dwSize.Y - 1, (int)(last_rendered_lines - 1));
+                    COORD pos {0, targetRow};
+                    SetConsoleCursorPosition(hConsole, pos);
+                    // Clear the line then rewrite
+                    DWORD written; 
+                    std::string clearLine(csbi.dwSize.X, ' ');
+                    WriteConsoleOutputCharacterA(hConsole, clearLine.c_str(), (DWORD)clearLine.size(), pos, &written);
+                    SetConsoleCursorPosition(hConsole, pos);
+                    std::cout << "root:\\> " << input_snapshot << std::flush;
+                }
+            }
+#else
+            // POSIX: Move cursor to line and clear then rewrite (1-based coordinates)
+            size_t targetRow = last_rendered_lines; // prompt line approx
+            std::cout << "\033[" << targetRow << ";1H"; // move
+            std::cout << "\033[2K"; // clear line
+            std::cout << "root:\\> " << input_snapshot << std::flush;
+#endif
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(refresh_rate_ms));

@@ -3,14 +3,17 @@
 
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <deque>
 #include <mutex>
 #include <string>
 #include <cstdint>
 #include <memory>
 
-// Page size in bytes (1KB)
-const size_t PAGE_SIZE = 1024;
+// Page size in bytes - now uses mem_per_frame from config
+// Default 1024 if not configured
+inline size_t getPageSize();
+const size_t PAGE_SIZE = 1024; // Fallback for compilation
 
 // Single page table entry, for process
 struct PageTableEntry {
@@ -78,6 +81,8 @@ private:
     uint64_t currentTime;
     MemoryStats stats;
     mutable std::mutex memoryMutex;
+    // Tracks which (pid,page) pairs have been written to backing store at least once
+    std::unordered_set<uint64_t> backingStorePresence;
 };
 
 // Global memory instance
